@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Umów termin</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <h1>Umów termin</h1>
+      <div class="sub">Wybierz dzień i godzinę, które Ci pasują</div>
+    </div>
+  </div>
+
+  <div id="notConnected" class="notice-box" style="display:none;">
+    Kalendarz nie jest jeszcze skonfigurowany przez właściciela. Spróbuj ponownie później.
+  </div>
+
+  <div id="mainLayout" class="layout two-col">
+    <div class="card service-card">
+      <h3>Spotkanie</h3>
+      <p id="durationLabel">Czas trwania: —</p>
+      <p>Po wybraniu terminu wystarczy podać imię i numer telefonu.</p>
+    </div>
+
+    <div class="card">
+      <div class="cal-nav">
+        <button id="prevMonth" aria-label="Poprzedni miesiąc">‹</button>
+        <div class="cal-month-label" id="monthLabel">—</div>
+        <button id="nextMonth" aria-label="Następny miesiąc">›</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+
+      <div id="slotsSection" style="display:none;">
+        <div class="slots-title" id="slotsTitle">Dostępne godziny</div>
+        <div class="slots-grid" id="slotsGrid"></div>
+      </div>
+
+      <form class="booking-form" id="bookingForm">
+        <div class="field">
+          <label for="name">Imię i nazwisko</label>
+          <input type="text" id="name" required />
+        </div>
+        <div class="field">
+          <label for="phone">Numer telefonu</label>
+          <input type="tel" id="phone" placeholder="np. 600 123 456" required />
+        </div>
+        <div class="field">
+          <label for="note">Wiadomość (opcjonalnie)</label>
+          <textarea id="note"></textarea>
+        </div>
+        <button type="submit" class="btn-primary" id="submitBtn">Potwierdź termin</button>
+        <div id="formError" class="error-box" style="display:none;"></div>
+      </form>
+
+      <div id="confirmBox" class="confirm-box" style="display:none;">
+        <h3>Termin potwierdzony</h3>
+        <p id="confirmText"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/booking.js"></script>
+</body>
+</html>

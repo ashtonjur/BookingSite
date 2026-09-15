@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Panel administracyjny — rezerwacje</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <h1>Panel administracyjny</h1>
+      <div class="sub">Zarządzaj połączeniem z kalendarzem i podglądaj rezerwacje</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 24px;">
+    <h3>Google Calendar</h3>
+    <p id="connStatus">Sprawdzanie połączenia…</p>
+    <a id="connectBtn" href="/auth/google" class="btn-primary" style="display:none; text-decoration:none; display:inline-block;">Połącz Google Calendar</a>
+  </div>
+
+  <div class="card">
+    <h3>Nadchodzące rezerwacje</h3>
+    <div id="bookingsWrap">
+      <p class="empty-note">Ładowanie…</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 24px;">
+    <h3>Link dla klientów</h3>
+    <p>Wyślij ten adres klientom, żeby mogli sami umówić termin:</p>
+    <p><code id="publicLink"></code></p>
+  </div>
+</div>
+
+<script src="/js/admin.js"></script>
+</body>
+</html>
