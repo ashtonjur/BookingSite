@@ -1,7 +1,11 @@
 const { google } = require('googleapis');
 const db = require('./db');
 
-const SCOPES = ['https://www.googleapis.com/auth/calendar'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+];
 
 function createOAuthClient() {
   return new google.auth.OAuth2(
@@ -14,8 +18,8 @@ function createOAuthClient() {
 function getAuthUrl() {
   const client = createOAuthClient();
   return client.generateAuthUrl({
-    access_type: 'offline', 
-    prompt: 'consent',    
+    access_type: 'offline', // wazne: zeby dostac refresh_token
+    prompt: 'consent',      // wymusza ponowne wydanie refresh_token
     scope: SCOPES,
   });
 }
@@ -98,7 +102,14 @@ async function getBusyIntervals(timeMin, timeMax) {
   return busy.map((b) => ({ start: new Date(b.start), end: new Date(b.end) }));
 }
 
-async function createEvent({ summary, description, startISO, endISO, attendeeEmail }) {
+
+const LOCATION_COLOR_IDS = { '1': '9', '2': '10' };
+
+function getLocationColorId(locationKey) {
+  return LOCATION_COLOR_IDS[locationKey] || null;
+}
+
+async function createEvent({ summary, description, startISO, endISO, colorId }) {
   const client = await getAuthorizedClient();
   const calendar = google.calendar({ version: 'v3', auth: client });
   const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
@@ -108,14 +119,13 @@ async function createEvent({ summary, description, startISO, endISO, attendeeEma
     description,
     start: { dateTime: startISO, timeZone: process.env.TIMEZONE || 'UTC' },
     end: { dateTime: endISO, timeZone: process.env.TIMEZONE || 'UTC' },
-    attendees: attendeeEmail ? [{ email: attendeeEmail }] : [],
     reminders: { useDefault: true },
   };
+  if (colorId) event.colorId = colorId;
 
   const res = await calendar.events.insert({
     calendarId,
     requestBody: event,
-    sendUpdates: 'all',
   });
 
   return res.data.id;
@@ -125,7 +135,7 @@ async function deleteEvent(eventId) {
   const client = await getAuthorizedClient();
   const calendar = google.calendar({ version: 'v3', auth: client });
   const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
-  await calendar.events.delete({ calendarId, eventId, sendUpdates: 'all' });
+  await calendar.events.delete({ calendarId, eventId });
 }
 
 module.exports = {
@@ -139,4 +149,5 @@ module.exports = {
   getBusyIntervals,
   createEvent,
   deleteEvent,
+  getLocationColorId,
 };

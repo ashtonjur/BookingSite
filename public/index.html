@@ -37,30 +37,47 @@
       <div id="slotsSection" style="display:none;">
         <div class="slots-title" id="slotsTitle">Dostępne godziny</div>
         <div class="slots-grid" id="slotsGrid"></div>
+        <button type="button" class="btn-primary" id="reserveBtn" style="display:none; margin-top:16px;">Zarezerwuj</button>
       </div>
-
-      <form class="booking-form" id="bookingForm">
-        <div class="field">
-          <label for="name">Imię i nazwisko</label>
-          <input type="text" id="name" required />
-        </div>
-        <div class="field">
-          <label for="phone">Numer telefonu</label>
-          <input type="tel" id="phone" placeholder="np. 600 123 456" required />
-        </div>
-        <div class="field">
-          <label for="note">Wiadomość (opcjonalnie)</label>
-          <textarea id="note"></textarea>
-        </div>
-        <button type="submit" class="btn-primary" id="submitBtn">Potwierdź termin</button>
-        <div id="formError" class="error-box" style="display:none;"></div>
-      </form>
 
       <div id="confirmBox" class="confirm-box" style="display:none;">
         <h3>Termin potwierdzony</h3>
         <p id="confirmText"></p>
       </div>
     </div>
+  </div>
+</div>
+
+<div id="modalOverlay" class="modal-overlay" style="display:none;">
+  <div class="modal card">
+    <h3>Potwierdź rezerwację</h3>
+    <p class="sub" id="modalSummary"></p>
+
+    <form id="bookingForm">
+      <div class="field">
+        <label for="name">Imię i nazwisko</label>
+        <input type="text" id="name" required />
+      </div>
+      <div class="field">
+        <label for="phone">Numer telefonu</label>
+        <input type="tel" id="phone" placeholder="np. 600 123 456" required />
+      </div>
+      <div class="field">
+        <label>Lokalizacja</label>
+        <div class="location-options" id="locationOptions"></div>
+      </div>
+      <div class="field">
+        <label for="note">Wiadomość (opcjonalnie)</label>
+        <textarea id="note"></textarea>
+      </div>
+
+      <div id="formError" class="error-box" style="display:none;"></div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="modalCancel">Anuluj</button>
+        <button type="submit" class="btn-primary" id="submitBtn">Zatwierdź</button>
+      </div>
+    </form>
   </div>
 </div>
 

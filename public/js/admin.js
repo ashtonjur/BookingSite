@@ -23,6 +23,16 @@
     }
   }
 
+  let locationsById = {};
+
+  async function loadLocations() {
+    const res = await fetch('/api/locations');
+    const data = await res.json();
+    (data.locations || []).forEach((loc) => {
+      locationsById[loc.id] = loc;
+    });
+  }
+
   async function loadBookings() {
     const res = await fetch('/api/bookings');
     if (!res.ok) {
@@ -41,7 +51,7 @@
     table.className = 'bookings';
     table.innerHTML = `
       <thead>
-        <tr><th>Data</th><th>Godz.</th><th>Klient</th><th>Telefon</th><th>Notatka</th><th></th></tr>
+        <tr><th>Data</th><th>Godz.</th><th>Klient</th><th>Telefon</th><th>Lokalizacja</th><th>Notatka</th><th></th></tr>
       </thead>
       <tbody></tbody>
     `;
@@ -49,11 +59,15 @@
 
     rows.forEach((b) => {
       const tr = document.createElement('tr');
+      const loc = locationsById[b.location];
+      const locColor = loc?.color === 'green' ? '#3f8a4c' : '#3b6fd6';
+      const locLabel = loc?.name || b.location;
       tr.innerHTML = `
         <td>${b.date}</td>
         <td>${b.time}</td>
         <td>${escapeHtml(b.name)}</td>
         <td>${escapeHtml(b.phone)}</td>
+        <td><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${locColor};margin-right:6px;"></span>${locLabel}</td>
         <td>${escapeHtml(b.note || '—')}</td>
         <td><button class="cancel-link" data-id="${b.id}">Anuluj</button></td>
       `;
@@ -87,5 +101,5 @@
   }
 
   loadStatus();
-  loadBookings();
+  loadLocations().then(loadBookings);
 })();

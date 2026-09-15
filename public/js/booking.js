@@ -6,6 +6,12 @@
   const slotsSection = document.getElementById('slotsSection');
   const slotsTitle = document.getElementById('slotsTitle');
   const slotsGrid = document.getElementById('slotsGrid');
+  const reserveBtn = document.getElementById('reserveBtn');
+
+  const modalOverlay = document.getElementById('modalOverlay');
+  const modalSummary = document.getElementById('modalSummary');
+  const modalCancel = document.getElementById('modalCancel');
+  const locationOptions = document.getElementById('locationOptions');
   const bookingForm = document.getElementById('bookingForm');
   const confirmBox = document.getElementById('confirmBox');
   const confirmText = document.getElementById('confirmText');
@@ -25,6 +31,8 @@
   let availableDaysSet = new Set();
   let selectedDate = null;
   let selectedTime = null;
+  let selectedLocation = null;
+  let locations = [];
 
   const todayStr = toISODate(new Date());
 
@@ -39,8 +47,11 @@
   function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
 
   async function init() {
-    const res = await fetch('/api/status');
-    const status = await res.json();
+    const [statusRes, locationsRes] = await Promise.all([
+      fetch('/api/status'),
+      fetch('/api/locations'),
+    ]);
+    const status = await statusRes.json();
     if (!status.connected) {
       notConnected.style.display = 'block';
       mainLayout.style.display = 'none';
@@ -48,10 +59,32 @@
     }
     durationLabel.textContent = `Czas trwania: ${status.slotDurationMin} min`;
 
+    const locData = await locationsRes.json();
+    locations = locData.locations || [];
+    renderLocationOptions();
+
     const now = new Date();
     viewYear = now.getFullYear();
     viewMonth = now.getMonth();
     await loadMonth();
+  }
+
+  function renderLocationOptions() {
+    locationOptions.innerHTML = '';
+    locations.forEach((loc) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'location-btn';
+      btn.dataset.color = loc.color;
+      btn.dataset.id = loc.id;
+      btn.innerHTML = `<span class="dot"></span>${loc.name}`;
+      btn.addEventListener('click', () => {
+        selectedLocation = loc.id;
+        document.querySelectorAll('.location-btn').forEach((b) => b.classList.remove('selected'));
+        btn.classList.add('selected');
+      });
+      locationOptions.appendChild(btn);
+    });
   }
 
   async function loadMonth() {
@@ -77,7 +110,6 @@
     });
 
     const first = firstOfMonth(viewYear, viewMonth);
-    // JS getDay(): 0=niedziela...6=sobota -> przeliczamy na uklad pon..nd
     let leading = first.getDay() === 0 ? 6 : first.getDay() - 1;
 
     for (let i = 0; i < leading; i++) {
@@ -113,12 +145,11 @@
     document.querySelectorAll('.cal-day.selected').forEach((n) => n.classList.remove('selected'));
     el.classList.add('selected');
 
-    bookingForm.classList.remove('visible');
-    confirmBox.style.display = 'none';
-
+    reserveBtn.style.display = 'none';
     slotsSection.style.display = 'block';
     slotsTitle.textContent = 'Ładowanie godzin…';
     slotsGrid.innerHTML = '';
+    confirmBox.style.display = 'none';
 
     const res = await fetch(`/api/available-slots?date=${iso}`);
     const data = await res.json();
@@ -143,13 +174,38 @@
     selectedTime = time;
     document.querySelectorAll('.slot-btn.selected').forEach((n) => n.classList.remove('selected'));
     btn.classList.add('selected');
-    bookingForm.classList.add('visible');
-    formError.style.display = 'none';
+    reserveBtn.style.display = 'inline-block';
   }
+
+  function openModal() {
+    modalSummary.textContent = `${selectedDate} o ${selectedTime}`;
+    formError.style.display = 'none';
+    selectedLocation = null;
+    document.querySelectorAll('.location-btn').forEach((b) => b.classList.remove('selected'));
+    bookingForm.reset();
+    modalOverlay.style.display = 'flex';
+  }
+
+  function closeModal() {
+    modalOverlay.style.display = 'none';
+  }
+
+  reserveBtn.addEventListener('click', openModal);
+  modalCancel.addEventListener('click', closeModal);
+  modalOverlay.addEventListener('click', (e) => {
+    if (e.target === modalOverlay) closeModal();
+  });
 
   bookingForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     formError.style.display = 'none';
+
+    if (!selectedLocation) {
+      formError.textContent = 'Wybierz lokalizację.';
+      formError.style.display = 'block';
+      return;
+    }
+
     submitBtn.disabled = true;
     submitBtn.textContent = 'Wysyłanie…';
 
@@ -158,6 +214,7 @@
       time: selectedTime,
       name: document.getElementById('name').value.trim(),
       phone: document.getElementById('phone').value.trim(),
+      location: selectedLocation,
       note: document.getElementById('note').value.trim(),
     };
 
@@ -173,10 +230,13 @@
         if (data.error === 'slot_taken') {
           formError.textContent = 'Ten termin został właśnie zajęty. Wybierz proszę inną godzinę.';
           formError.style.display = 'block';
+          closeModal();
           await selectDate(selectedDate, document.querySelector('.cal-day.selected'));
-          bookingForm.classList.remove('visible');
         } else if (data.error === 'invalid_phone') {
           formError.textContent = 'Podaj poprawny numer telefonu (min. 9 cyfr).';
+          formError.style.display = 'block';
+        } else if (data.error === 'invalid_location') {
+          formError.textContent = 'Wybierz lokalizację.';
           formError.style.display = 'block';
         } else {
           formError.textContent = 'Coś poszło nie tak. Spróbuj ponownie za chwilę.';
@@ -185,11 +245,11 @@
         return;
       }
 
-      bookingForm.classList.remove('visible');
+      closeModal();
       slotsSection.style.display = 'none';
       confirmBox.style.display = 'block';
       confirmText.textContent =
-        `${payload.name}, do zobaczenia ${selectedDate} o ${selectedTime}. Zarezerwowaliśmy termin na numer ${payload.phone}.`;
+        `${payload.name}, do zobaczenia ${selectedDate} o ${selectedTime} (${data.booking.location}). Zarezerwowaliśmy termin na numer ${payload.phone}.`;
 
       await loadMonth();
     } catch (err) {
@@ -197,7 +257,7 @@
       formError.style.display = 'block';
     } finally {
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Potwierdź termin';
+      submitBtn.textContent = 'Zatwierdź';
     }
   });
 
@@ -206,7 +266,7 @@
     if (viewMonth < 0) { viewMonth = 11; viewYear--; }
     selectedDate = null;
     slotsSection.style.display = 'none';
-    bookingForm.classList.remove('visible');
+    reserveBtn.style.display = 'none';
     loadMonth();
   });
 
@@ -215,7 +275,7 @@
     if (viewMonth > 11) { viewMonth = 0; viewYear++; }
     selectedDate = null;
     slotsSection.style.display = 'none';
-    bookingForm.classList.remove('visible');
+    reserveBtn.style.display = 'none';
     loadMonth();
   });
 

@@ -26,6 +26,7 @@ db.exec(`
     duration_min INTEGER NOT NULL,
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
+    location TEXT NOT NULL,
     note TEXT,
     google_event_id TEXT,
     status TEXT NOT NULL DEFAULT 'confirmed', -- confirmed | cancelled

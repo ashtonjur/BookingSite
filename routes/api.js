@@ -8,6 +8,20 @@ const availability = require('../availability');
 
 const router = express.Router();
 
+const LOCATION_NAMES = {
+  '1': process.env.LOCATION_1_NAME || 'Lokalizacja 1',
+  '2': process.env.LOCATION_2_NAME || 'Lokalizacja 2',
+};
+
+router.get('/locations', (req, res) => {
+  res.json({
+    locations: [
+      { id: '1', name: LOCATION_NAMES['1'], color: 'blue' },
+      { id: '2', name: LOCATION_NAMES['2'], color: 'green' },
+    ],
+  });
+});
+
 router.get('/status', (req, res) => {
   const cfg = availability.getConfig();
   res.json({
@@ -55,20 +69,23 @@ router.get('/available-slots', async (req, res) => {
   }
 });
 
-
 router.post('/book', express.json(), async (req, res) => {
   try {
     if (!google.isConnected()) {
       return res.status(409).json({ error: 'not_connected' });
     }
-    const { date, time, name, email, note } = req.body || {};
+    const { date, time, name, phone, location, note } = req.body || {};
 
-    if (!date || !time || !name || !email) {
+    if (!date || !time || !name || !phone || !location) {
       return res.status(400).json({ error: 'missing_fields' });
     }
-    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-    if (!emailOk) {
-      return res.status(400).json({ error: 'invalid_email' });
+    if (!LOCATION_NAMES[location]) {
+      return res.status(400).json({ error: 'invalid_location' });
+    }
+    const digitsOnly = phone.replace(/[^\d]/g, '');
+    const phoneOk = /^\+?[\d\s-]{9,20}$/.test(phone) && digitsOnly.length >= 9;
+    if (!phoneOk) {
+      return res.status(400).json({ error: 'invalid_phone' });
     }
 
     const cfg = availability.getConfig();
@@ -82,23 +99,27 @@ router.post('/book', express.json(), async (req, res) => {
     const startDT = match;
     const endDT = startDT.plus({ minutes: cfg.slotDuration });
 
+    const locationName = LOCATION_NAMES[location];
+    const descriptionLines = [`Telefon: ${phone}`, `Lokalizacja: ${locationName}`];
+    if (note) descriptionLines.push(`Notatka klienta: ${note}`);
+
     const eventId = await google.createEvent({
-      summary: `Rezerwacja: ${name}`,
-      description: note ? `Notatka klienta: ${note}` : undefined,
+      summary: `Rezerwacja: ${name} — ${locationName}`,
+      description: descriptionLines.join('\n'),
       startISO: startDT.toISO(),
       endISO: endDT.toISO(),
-      attendeeEmail: email,
+      colorId: google.getLocationColorId(location),
     });
 
     const id = nanoid(10);
     db.prepare(`
-      INSERT INTO bookings (id, date, time, duration_min, name, email, note, google_event_id, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')
-    `).run(id, date, time, cfg.slotDuration, name, email, note || null, eventId);
+      INSERT INTO bookings (id, date, time, duration_min, name, phone, location, note, google_event_id, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')
+    `).run(id, date, time, cfg.slotDuration, name, phone, location, note || null, eventId);
 
     res.json({
       ok: true,
-      booking: { id, date, time, name, email },
+      booking: { id, date, time, name, phone, location: locationName },
     });
   } catch (err) {
     console.error(err);
@@ -108,7 +129,7 @@ router.post('/book', express.json(), async (req, res) => {
 
 router.get('/bookings', (req, res) => {
   const rows = db.prepare(`
-    SELECT id, date, time, duration_min, name, email, note, status, created_at
+    SELECT id, date, time, duration_min, name, phone, location, note, status, created_at
     FROM bookings
     WHERE status = 'confirmed'
     ORDER BY date ASC, time ASC
