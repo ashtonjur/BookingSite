@@ -21,6 +21,9 @@ app.use('/admin.html', adminAuth);
 app.use('/auth', adminAuth, authRoutes);
 app.get('/api/bookings', adminAuth);
 app.post('/api/bookings/:id/cancel', adminAuth);
+app.get('/api/blocked', adminAuth);
+app.post('/api/blocked', adminAuth);
+app.delete('/api/blocked/:id', adminAuth);
 
 app.use('/api', apiRoutes);
 

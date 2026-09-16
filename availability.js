@@ -33,11 +33,28 @@ function overlaps(slotStart, slotEnd, busyStart, busyEnd) {
   return slotStart < busyEnd && slotEnd > busyStart;
 }
 
+function isDateBlocked(dateISO) {
+  const row = db.prepare(
+    `SELECT 1 FROM blocked_slots WHERE date = ? AND time IS NULL LIMIT 1`
+  ).get(dateISO);
+  return !!row;
+}
+
+function getBlockedTimesForDate(dateISO) {
+  const rows = db.prepare(
+    `SELECT time FROM blocked_slots WHERE date = ? AND time IS NOT NULL`
+  ).all(dateISO);
+  return new Set(rows.map((r) => r.time));
+}
+
 async function getAvailableSlotsForDate(dateISO) {
   const cfg = getConfig();
   const dt = DateTime.fromISO(dateISO, { zone: cfg.timezone });
 
   if (!cfg.workDays.includes(dt.weekday % 7)) {
+    return [];
+  }
+  if (isDateBlocked(dateISO)) {
     return [];
   }
 
@@ -56,9 +73,12 @@ async function getAvailableSlotsForDate(dateISO) {
     `SELECT time FROM bookings WHERE date = ? AND status = 'confirmed'`
   ).all(dateISO);
   const localBookedTimes = new Set(localBookings.map((b) => b.time));
+  const blockedTimes = getBlockedTimesForDate(dateISO);
 
   return daySlots.filter((slotStart) => {
-    if (localBookedTimes.has(slotStart.toFormat('HH:mm'))) return false;
+    const timeStr = slotStart.toFormat('HH:mm');
+    if (localBookedTimes.has(timeStr)) return false;
+    if (blockedTimes.has(timeStr)) return false;
     if (slotStart < minStart) return false;
 
     const slotEnd = slotStart.plus({ minutes: cfg.slotDuration });
@@ -86,13 +106,16 @@ async function getAvailableDaysInRange(fromISO, toISO) {
   let cursor = from;
   while (cursor <= to) {
     const dateISO = cursor.toFormat('yyyy-MM-dd');
-    if (cfg.workDays.includes(cursor.weekday % 7)) {
+    if (cfg.workDays.includes(cursor.weekday % 7) && !isDateBlocked(dateISO)) {
       const daySlots = generateDaySlots(dateISO, cfg);
       const localBookedTimes = new Set(
         localBookings.filter((b) => b.date === dateISO).map((b) => b.time)
       );
+      const blockedTimes = getBlockedTimesForDate(dateISO);
       const hasFree = daySlots.some((slotStart) => {
-        if (localBookedTimes.has(slotStart.toFormat('HH:mm'))) return false;
+        const timeStr = slotStart.toFormat('HH:mm');
+        if (localBookedTimes.has(timeStr)) return false;
+        if (blockedTimes.has(timeStr)) return false;
         if (slotStart < minStart) return false;
         const slotEnd = slotStart.plus({ minutes: cfg.slotDuration });
         return !busy.some((b) => overlaps(slotStart.toJSDate(), slotEnd.toJSDate(), b.start, b.end));

@@ -100,6 +100,102 @@
     return div.innerHTML;
   }
 
+  // --- Blokowanie terminow ---
+  const blockForm = document.getElementById('blockForm');
+  const blockDate = document.getElementById('blockDate');
+  const blockTime = document.getElementById('blockTime');
+  const blockReason = document.getElementById('blockReason');
+  const blockError = document.getElementById('blockError');
+  const blockedWrap = document.getElementById('blockedWrap');
+
+  async function loadBlocked() {
+    const res = await fetch('/api/blocked');
+    if (!res.ok) {
+      blockedWrap.innerHTML = '<p class="empty-note">Nie udało się pobrać zablokowanych terminów.</p>';
+      return;
+    }
+    const data = await res.json();
+    const rows = data.blocked || [];
+
+    if (rows.length === 0) {
+      blockedWrap.innerHTML = '<p class="empty-note">Brak zablokowanych terminów.</p>';
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'bookings';
+    table.innerHTML = `
+      <thead>
+        <tr><th>Data</th><th>Godzina</th><th>Powód</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody');
+
+    rows.forEach((b) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${b.date}</td>
+        <td>${b.time || 'cały dzień'}</td>
+        <td>${escapeHtml(b.reason || '—')}</td>
+        <td><button class="cancel-link" data-id="${b.id}">Odblokuj</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    blockedWrap.innerHTML = '';
+    blockedWrap.appendChild(table);
+
+    tbody.querySelectorAll('.cancel-link').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Odblokowuję…';
+        const res = await fetch(`/api/blocked/${btn.dataset.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          loadBlocked();
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Odblokuj';
+          alert('Nie udało się odblokować terminu.');
+        }
+      });
+    });
+  }
+
+  blockForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    blockError.style.display = 'none';
+
+    const payload = {
+      date: blockDate.value,
+      time: blockTime.value || null,
+      reason: blockReason.value.trim() || null,
+    };
+
+    if (!payload.date) {
+      blockError.textContent = 'Podaj datę.';
+      blockError.style.display = 'block';
+      return;
+    }
+
+    const res = await fetch('/api/blocked', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      blockError.textContent = 'Nie udało się dodać blokady. Sprawdź datę i godzinę.';
+      blockError.style.display = 'block';
+      return;
+    }
+
+    blockForm.reset();
+    loadBlocked();
+  });
+
+  loadBlocked();
+
   loadStatus();
   loadLocations().then(loadBookings);
 })();

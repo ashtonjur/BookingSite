@@ -127,6 +127,40 @@ router.post('/book', express.json(), async (req, res) => {
   }
 });
 
+router.get('/blocked', (req, res) => {
+  const rows = db.prepare(`
+    SELECT id, date, time, reason, created_at
+    FROM blocked_slots
+    ORDER BY date ASC, (time IS NULL) DESC, time ASC
+  `).all();
+  res.json({ blocked: rows });
+});
+
+router.post('/blocked', express.json(), (req, res) => {
+  const { date, time, reason } = req.body || {};
+
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'invalid_date' });
+  }
+  if (time && !/^\d{2}:\d{2}$/.test(time)) {
+    return res.status(400).json({ error: 'invalid_time' });
+  }
+
+  const id = nanoid(10);
+  db.prepare(`
+    INSERT INTO blocked_slots (id, date, time, reason)
+    VALUES (?, ?, ?, ?)
+  `).run(id, date, time || null, reason || null);
+
+  res.json({ ok: true, id });
+});
+
+router.delete('/blocked/:id', (req, res) => {
+  const result = db.prepare('DELETE FROM blocked_slots WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
+  res.json({ ok: true });
+});
+
 router.get('/bookings', (req, res) => {
   const rows = db.prepare(`
     SELECT id, date, time, duration_min, name, phone, location, note, status, created_at
