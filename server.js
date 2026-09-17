@@ -29,7 +29,7 @@ app.use('/api', apiRoutes);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Booking app dziala na porcie ${PORT}`);
   console.log(`Strona rezerwacji: ${process.env.BASE_URL || 'http://localhost:' + PORT}`);
   console.log(`Panel admina:      ${process.env.BASE_URL || 'http://localhost:' + PORT}/admin.html`);
