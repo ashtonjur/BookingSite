@@ -11,6 +11,10 @@ const apiRoutes = require('./routes/api');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 const adminAuth = basicAuth({
   users: { [process.env.ADMIN_USER || 'admin']: process.env.ADMIN_PASSWORD || 'zmien_to_haslo' },
   challenge: true,
