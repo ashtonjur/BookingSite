@@ -5,26 +5,50 @@ const db = require('./db');
 function getConfig() {
   return {
     timezone: process.env.TIMEZONE || 'Europe/Warsaw',
-    workStart: process.env.WORK_START || '09:00',
-    workEnd: process.env.WORK_END || '17:00',
-    workDays: (process.env.WORK_DAYS || '1,2,3,4,5').split(',').map(Number), // 0=niedziela
-    slotDuration: parseInt(process.env.SLOT_DURATION_MIN || '30', 10),
+    workStart: process.env.WORK_START || '06:00',
+    workEnd: process.env.WORK_END || '22:00',
+    satWorkStart: process.env.SAT_WORK_START || null,
+    satWorkEnd: process.env.SAT_WORK_END || null,
+    workDays: (process.env.WORK_DAYS || '1,2,3,4,5,6').split(',').map(Number),
+    slotStep: parseInt(process.env.SLOT_STEP_MIN || '15', 10),
+    durationOptions: (process.env.DURATION_OPTIONS_MIN || '60,90').split(',').map(Number),
     windowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '30', 10),
     minNoticeHours: parseInt(process.env.MIN_NOTICE_HOURS || '12', 10),
   };
 }
 
-function generateDaySlots(dateISO, cfg) {
-  const [sh, sm] = cfg.workStart.split(':').map(Number);
-  const [eh, em] = cfg.workEnd.split(':').map(Number);
+function isValidDuration(durationMin, cfg) {
+  return cfg.durationOptions.includes(Number(durationMin));
+}
 
-  let cursor = DateTime.fromISO(dateISO, { zone: cfg.timezone }).set({ hour: sh, minute: sm, second: 0, millisecond: 0 });
-  const end = DateTime.fromISO(dateISO, { zone: cfg.timezone }).set({ hour: eh, minute: em, second: 0, millisecond: 0 });
+function getBookingWindowEnd(cfg) {
+  const now = DateTime.now().setZone(cfg.timezone);
+  const daysToSunday = 7 - now.weekday; // luxon: weekday 1=pon...7=nd
+  return now.plus({ days: daysToSunday + 7 }).endOf('day');
+}
 
+function getWorkBounds(dateISO, cfg) {
+  const dt = DateTime.fromISO(dateISO, { zone: cfg.timezone });
+  const isSaturday = dt.weekday % 7 === 6;
+
+  const startStr = (isSaturday && cfg.satWorkStart) ? cfg.satWorkStart : cfg.workStart;
+  const endStr = (isSaturday && cfg.satWorkEnd) ? cfg.satWorkEnd : cfg.workEnd;
+
+  const [sh, sm] = startStr.split(':').map(Number);
+  const [eh, em] = endStr.split(':').map(Number);
+
+  const start = dt.set({ hour: sh, minute: sm, second: 0, millisecond: 0 });
+  const end = dt.set({ hour: eh, minute: em, second: 0, millisecond: 0 });
+  return { start, end };
+}
+
+function generateCandidateStarts(dateISO, cfg, durationMin) {
+  const { start, end } = getWorkBounds(dateISO, cfg);
   const slots = [];
-  while (cursor.plus({ minutes: cfg.slotDuration }) <= end) {
+  let cursor = start;
+  while (cursor.plus({ minutes: durationMin }) <= end) {
     slots.push(cursor);
-    cursor = cursor.plus({ minutes: cfg.slotDuration });
+    cursor = cursor.plus({ minutes: cfg.slotStep });
   }
   return slots;
 }
@@ -40,64 +64,65 @@ function isDateBlocked(dateISO) {
   return !!row;
 }
 
-function getBlockedTimesForDate(dateISO) {
+function getLocalBookingIntervals(dateISO, cfg) {
+  const rows = db.prepare(
+    `SELECT time, duration_min FROM bookings WHERE date = ? AND status = 'confirmed'`
+  ).all(dateISO);
+  return rows.map((r) => {
+    const start = DateTime.fromISO(`${dateISO}T${r.time}`, { zone: cfg.timezone });
+    return { start: start.toJSDate(), end: start.plus({ minutes: r.duration_min }).toJSDate() };
+  });
+}
+
+function getBlockedIntervals(dateISO, cfg) {
   const rows = db.prepare(
     `SELECT time FROM blocked_slots WHERE date = ? AND time IS NOT NULL`
   ).all(dateISO);
-  return new Set(rows.map((r) => r.time));
+  return rows.map((r) => {
+    const start = DateTime.fromISO(`${dateISO}T${r.time}`, { zone: cfg.timezone });
+    return { start: start.toJSDate(), end: start.plus({ minutes: cfg.slotStep }).toJSDate() };
+  });
 }
 
-async function getAvailableSlotsForDate(dateISO) {
+async function getAvailableSlotsForDate(dateISO, durationMin) {
   const cfg = getConfig();
   const dt = DateTime.fromISO(dateISO, { zone: cfg.timezone });
 
-  if (!cfg.workDays.includes(dt.weekday % 7)) {
-    return [];
-  }
-  if (isDateBlocked(dateISO)) {
-    return [];
-  }
+  if (!cfg.workDays.includes(dt.weekday % 7)) return [];
+  if (isDateBlocked(dateISO)) return [];
+  if (dt > getBookingWindowEnd(cfg)) return [];
 
-  const daySlots = generateDaySlots(dateISO, cfg);
-  if (daySlots.length === 0) return [];
+  const candidates = generateCandidateStarts(dateISO, cfg, durationMin);
+  if (candidates.length === 0) return [];
 
-  const dayStart = daySlots[0];
-  const dayEnd = daySlots[daySlots.length - 1].plus({ minutes: cfg.slotDuration });
-
-  const busy = await google.getBusyIntervals(dayStart.toISO(), dayEnd.toISO());
+  const { start: workStart, end: workEnd } = getWorkBounds(dateISO, cfg);
+  const busy = await google.getBusyIntervals(workStart.toISO(), workEnd.toISO());
 
   const now = DateTime.now().setZone(cfg.timezone);
   const minStart = now.plus({ hours: cfg.minNoticeHours });
 
-  const localBookings = db.prepare(
-    `SELECT time FROM bookings WHERE date = ? AND status = 'confirmed'`
-  ).all(dateISO);
-  const localBookedTimes = new Set(localBookings.map((b) => b.time));
-  const blockedTimes = getBlockedTimesForDate(dateISO);
+  const allBusy = [
+    ...busy,
+    ...getLocalBookingIntervals(dateISO, cfg),
+    ...getBlockedIntervals(dateISO, cfg),
+  ];
 
-  return daySlots.filter((slotStart) => {
-    const timeStr = slotStart.toFormat('HH:mm');
-    if (localBookedTimes.has(timeStr)) return false;
-    if (blockedTimes.has(timeStr)) return false;
+  return candidates.filter((slotStart) => {
     if (slotStart < minStart) return false;
-
-    const slotEnd = slotStart.plus({ minutes: cfg.slotDuration });
-    const isBusy = busy.some((b) =>
-      overlaps(slotStart.toJSDate(), slotEnd.toJSDate(), b.start, b.end)
-    );
-    return !isBusy;
+    const slotEnd = slotStart.plus({ minutes: durationMin });
+    return !allBusy.some((b) => overlaps(slotStart.toJSDate(), slotEnd.toJSDate(), b.start, b.end));
   });
 }
 
-async function getAvailableDaysInRange(fromISO, toISO) {
+async function getAvailableDaysInRange(fromISO, toISO, durationMin) {
   const cfg = getConfig();
+  const windowEnd = getBookingWindowEnd(cfg);
   const from = DateTime.fromISO(fromISO, { zone: cfg.timezone }).startOf('day');
-  const to = DateTime.fromISO(toISO, { zone: cfg.timezone }).endOf('day');
+  const requestedTo = DateTime.fromISO(toISO, { zone: cfg.timezone }).endOf('day');
+  const to = requestedTo > windowEnd ? windowEnd : requestedTo;
+  if (to < from) return [];
 
   const busy = await google.getBusyIntervals(from.toISO(), to.toISO());
-  const localBookings = db.prepare(
-    `SELECT date, time FROM bookings WHERE status = 'confirmed' AND date BETWEEN ? AND ?`
-  ).all(fromISO, toISO);
 
   const now = DateTime.now().setZone(cfg.timezone);
   const minStart = now.plus({ hours: cfg.minNoticeHours });
@@ -107,18 +132,16 @@ async function getAvailableDaysInRange(fromISO, toISO) {
   while (cursor <= to) {
     const dateISO = cursor.toFormat('yyyy-MM-dd');
     if (cfg.workDays.includes(cursor.weekday % 7) && !isDateBlocked(dateISO)) {
-      const daySlots = generateDaySlots(dateISO, cfg);
-      const localBookedTimes = new Set(
-        localBookings.filter((b) => b.date === dateISO).map((b) => b.time)
-      );
-      const blockedTimes = getBlockedTimesForDate(dateISO);
-      const hasFree = daySlots.some((slotStart) => {
-        const timeStr = slotStart.toFormat('HH:mm');
-        if (localBookedTimes.has(timeStr)) return false;
-        if (blockedTimes.has(timeStr)) return false;
+      const candidates = generateCandidateStarts(dateISO, cfg, durationMin);
+      const dayBusy = [
+        ...busy,
+        ...getLocalBookingIntervals(dateISO, cfg),
+        ...getBlockedIntervals(dateISO, cfg),
+      ];
+      const hasFree = candidates.some((slotStart) => {
         if (slotStart < minStart) return false;
-        const slotEnd = slotStart.plus({ minutes: cfg.slotDuration });
-        return !busy.some((b) => overlaps(slotStart.toJSDate(), slotEnd.toJSDate(), b.start, b.end));
+        const slotEnd = slotStart.plus({ minutes: durationMin });
+        return !dayBusy.some((b) => overlaps(slotStart.toJSDate(), slotEnd.toJSDate(), b.start, b.end));
       });
       if (hasFree) availableDays.push(dateISO);
     }
@@ -127,4 +150,4 @@ async function getAvailableDaysInRange(fromISO, toISO) {
   return availableDays;
 }
 
-module.exports = { getConfig, getAvailableSlotsForDate, getAvailableDaysInRange };
+module.exports = { getConfig, isValidDuration, getBookingWindowEnd, getAvailableSlotsForDate, getAvailableDaysInRange };

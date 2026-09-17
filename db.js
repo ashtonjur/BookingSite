@@ -7,6 +7,16 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS blocked_slots (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,        -- YYYY-MM-DD
+    time TEXT,                 -- HH:MM, NULL = caly dzien zablokowany
+    reason TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS google_tokens (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     access_token TEXT,

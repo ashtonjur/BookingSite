@@ -7,6 +7,7 @@
   const slotsTitle = document.getElementById('slotsTitle');
   const slotsGrid = document.getElementById('slotsGrid');
   const reserveBtn = document.getElementById('reserveBtn');
+  const durationOptionsEl = document.getElementById('durationOptions');
 
   const modalOverlay = document.getElementById('modalOverlay');
   const modalSummary = document.getElementById('modalSummary');
@@ -17,7 +18,6 @@
   const confirmText = document.getElementById('confirmText');
   const formError = document.getElementById('formError');
   const submitBtn = document.getElementById('submitBtn');
-  const durationLabel = document.getElementById('durationLabel');
   const notConnected = document.getElementById('notConnected');
   const mainLayout = document.getElementById('mainLayout');
 
@@ -27,12 +27,21 @@
     'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień',
   ];
 
-  let viewYear, viewMonth; // viewMonth: 0-11
+  function formatDuration(min) {
+    if (min === 60) return '1 godzina';
+    if (min === 90) return '1,5 godziny';
+    if (min % 60 === 0) return `${min / 60} godz.`;
+    return `${min} min`;
+  }
+
+  let viewYear, viewMonth;
   let availableDaysSet = new Set();
   let selectedDate = null;
   let selectedTime = null;
   let selectedLocation = null;
+  let selectedDuration = null;
   let locations = [];
+  let durationOptions = [];
 
   const todayStr = toISODate(new Date());
 
@@ -57,7 +66,10 @@
       mainLayout.style.display = 'none';
       return;
     }
-    durationLabel.textContent = `Czas trwania: ${status.slotDurationMin} min`;
+
+    durationOptions = status.durationOptionsMin || [60, 90];
+    selectedDuration = durationOptions[0];
+    renderDurationOptions();
 
     const locData = await locationsRes.json();
     locations = locData.locations || [];
@@ -67,6 +79,31 @@
     viewYear = now.getFullYear();
     viewMonth = now.getMonth();
     await loadMonth();
+  }
+
+  function renderDurationOptions() {
+    durationOptionsEl.innerHTML = '';
+    durationOptions.forEach((min) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'duration-btn';
+      if (min === selectedDuration) btn.classList.add('selected');
+      btn.textContent = formatDuration(min);
+      btn.addEventListener('click', async () => {
+        if (selectedDuration === min) return;
+        selectedDuration = min;
+        document.querySelectorAll('.duration-btn').forEach((b) => b.classList.remove('selected'));
+        btn.classList.add('selected');
+
+        selectedDate = null;
+        selectedTime = null;
+        slotsSection.style.display = 'none';
+        reserveBtn.style.display = 'none';
+        confirmBox.style.display = 'none';
+        await loadMonth();
+      });
+      durationOptionsEl.appendChild(btn);
+    });
   }
 
   function renderLocationOptions() {
@@ -92,7 +129,7 @@
     const lastDay = new Date(viewYear, viewMonth, daysInMonth(viewYear, viewMonth));
     const to = toISODate(lastDay);
 
-    const res = await fetch(`/api/available-days?from=${from}&to=${to}`);
+    const res = await fetch(`/api/available-days?from=${from}&to=${to}&duration=${selectedDuration}`);
     const data = await res.json();
     availableDaysSet = new Set(data.days || []);
     renderCalendar();
@@ -151,7 +188,7 @@
     slotsGrid.innerHTML = '';
     confirmBox.style.display = 'none';
 
-    const res = await fetch(`/api/available-slots?date=${iso}`);
+    const res = await fetch(`/api/available-slots?date=${iso}&duration=${selectedDuration}`);
     const data = await res.json();
     const slots = data.slots || [];
 
@@ -178,7 +215,7 @@
   }
 
   function openModal() {
-    modalSummary.textContent = `${selectedDate} o ${selectedTime}`;
+    modalSummary.textContent = `${selectedDate} o ${selectedTime} · ${formatDuration(selectedDuration)}`;
     formError.style.display = 'none';
     selectedLocation = null;
     document.querySelectorAll('.location-btn').forEach((b) => b.classList.remove('selected'));
@@ -212,6 +249,7 @@
     const payload = {
       date: selectedDate,
       time: selectedTime,
+      duration: selectedDuration,
       name: document.getElementById('name').value.trim(),
       phone: document.getElementById('phone').value.trim(),
       location: selectedLocation,
@@ -238,6 +276,9 @@
         } else if (data.error === 'invalid_location') {
           formError.textContent = 'Wybierz lokalizację.';
           formError.style.display = 'block';
+        } else if (data.error === 'missing_fields') {
+          formError.textContent = 'Wypełnij wszystkie wymagane pola.';
+          formError.style.display = 'block';
         } else {
           formError.textContent = 'Coś poszło nie tak. Spróbuj ponownie za chwilę.';
           formError.style.display = 'block';
@@ -249,7 +290,7 @@
       slotsSection.style.display = 'none';
       confirmBox.style.display = 'block';
       confirmText.textContent =
-        `${payload.name}, do zobaczenia ${selectedDate} o ${selectedTime} (${data.booking.location}). Zarezerwowaliśmy termin na numer ${payload.phone}.`;
+        `${payload.name}, do zobaczenia ${selectedDate} o ${selectedTime} (${formatDuration(selectedDuration)}, ${data.booking.location}). Zarezerwowaliśmy termin na numer ${payload.phone}.`;
 
       await loadMonth();
     } catch (err) {

@@ -29,6 +29,34 @@
   </div>
 
   <div class="card" style="margin-top: 24px;">
+    <h3>Zablokowane terminy</h3>
+    <p class="sub" style="color: var(--ink-soft); font-size: 0.9rem; margin-bottom: 16px;">
+      Zablokuj konkretną godzinę albo cały dzień, żeby klienci nie mogli tam rezerwować.
+    </p>
+
+    <form id="blockForm" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+      <div class="field" style="margin-bottom:0;">
+        <label for="blockDate">Data</label>
+        <input type="date" id="blockDate" required />
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label for="blockTime">Godzina (puste = cały dzień)</label>
+        <input type="time" id="blockTime" />
+      </div>
+      <div class="field" style="margin-bottom:0; flex:1; min-width:160px;">
+        <label for="blockReason">Powód (opcjonalnie)</label>
+        <input type="text" id="blockReason" placeholder="np. urlop" />
+      </div>
+      <button type="submit" class="btn-primary">Zablokuj</button>
+    </form>
+    <div id="blockError" class="error-box" style="display:none;"></div>
+
+    <div id="blockedWrap" style="margin-top:18px;">
+      <p class="empty-note">Ładowanie…</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 24px;">
     <h3>Link dla klientów</h3>
     <p>Wyślij ten adres klientom, żeby mogli sami umówić termin:</p>
     <p><code id="publicLink"></code></p>

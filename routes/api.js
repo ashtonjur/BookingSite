@@ -26,11 +26,11 @@ router.get('/status', (req, res) => {
   const cfg = availability.getConfig();
   res.json({
     connected: google.isConnected(),
-    slotDurationMin: cfg.slotDuration,
+    durationOptionsMin: cfg.durationOptions,
+    slotStepMin: cfg.slotStep,
     timezone: cfg.timezone,
   });
 });
-
 
 router.get('/available-days', async (req, res) => {
   try {
@@ -43,8 +43,12 @@ router.get('/available-days', async (req, res) => {
 
     const from = req.query.from || today;
     const to = req.query.to || maxDate;
+    const duration = Number(req.query.duration) || cfg.durationOptions[0];
+    if (!availability.isValidDuration(duration, cfg)) {
+      return res.status(400).json({ error: 'invalid_duration' });
+    }
 
-    const days = await availability.getAvailableDaysInRange(from, to);
+    const days = await availability.getAvailableDaysInRange(from, to, duration);
     res.json({ days });
   } catch (err) {
     console.error(err);
@@ -52,16 +56,21 @@ router.get('/available-days', async (req, res) => {
   }
 });
 
-
 router.get('/available-slots', async (req, res) => {
   try {
     if (!google.isConnected()) {
       return res.status(409).json({ error: 'not_connected' });
     }
+    const cfg = availability.getConfig();
     const { date } = req.query;
     if (!date) return res.status(400).json({ error: 'missing_date' });
 
-    const slots = await availability.getAvailableSlotsForDate(date);
+    const duration = Number(req.query.duration) || cfg.durationOptions[0];
+    if (!availability.isValidDuration(duration, cfg)) {
+      return res.status(400).json({ error: 'invalid_duration' });
+    }
+
+    const slots = await availability.getAvailableSlotsForDate(date, duration);
     res.json({ slots: slots.map((s) => s.toFormat('HH:mm')) });
   } catch (err) {
     console.error(err);
@@ -74,9 +83,9 @@ router.post('/book', express.json(), async (req, res) => {
     if (!google.isConnected()) {
       return res.status(409).json({ error: 'not_connected' });
     }
-    const { date, time, name, phone, location, note } = req.body || {};
+    const { date, time, name, phone, location, note, duration } = req.body || {};
 
-    if (!date || !time || !name || !phone || !location) {
+    if (!date || !time || !name || !phone || !location || !duration) {
       return res.status(400).json({ error: 'missing_fields' });
     }
     if (!LOCATION_NAMES[location]) {
@@ -89,18 +98,22 @@ router.post('/book', express.json(), async (req, res) => {
     }
 
     const cfg = availability.getConfig();
+    const durationMin = Number(duration);
+    if (!availability.isValidDuration(durationMin, cfg)) {
+      return res.status(400).json({ error: 'invalid_duration' });
+    }
 
-    const freshSlots = await availability.getAvailableSlotsForDate(date);
+    const freshSlots = await availability.getAvailableSlotsForDate(date, durationMin);
     const match = freshSlots.find((s) => s.toFormat('HH:mm') === time);
     if (!match) {
       return res.status(409).json({ error: 'slot_taken' });
     }
 
     const startDT = match;
-    const endDT = startDT.plus({ minutes: cfg.slotDuration });
+    const endDT = startDT.plus({ minutes: durationMin });
 
     const locationName = LOCATION_NAMES[location];
-    const descriptionLines = [`Telefon: ${phone}`, `Lokalizacja: ${locationName}`];
+    const descriptionLines = [`Telefon: ${phone}`, `Lokalizacja: ${locationName}`, `Czas trwania: ${durationMin} min`];
     if (note) descriptionLines.push(`Notatka klienta: ${note}`);
 
     const eventId = await google.createEvent({
@@ -115,12 +128,43 @@ router.post('/book', express.json(), async (req, res) => {
     db.prepare(`
       INSERT INTO bookings (id, date, time, duration_min, name, phone, location, note, google_event_id, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')
-    `).run(id, date, time, cfg.slotDuration, name, phone, location, note || null, eventId);
+    `).run(id, date, time, durationMin, name, phone, location, note || null, eventId);
 
     res.json({
       ok: true,
-      booking: { id, date, time, name, phone, location: locationName },
+      booking: { id, date, time, name, phone, location: locationName, duration: durationMin },
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'server_error', message: err.message });
+  }
+});
+
+router.get('/bookings', (req, res) => {
+  const rows = db.prepare(`
+    SELECT id, date, time, duration_min, name, phone, location, note, status, created_at
+    FROM bookings
+    WHERE status = 'confirmed'
+    ORDER BY date ASC, time ASC
+  `).all();
+  res.json({ bookings: rows });
+});
+
+router.post('/bookings/:id/cancel', express.json(), async (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM bookings WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'not_found' });
+
+    if (row.google_event_id) {
+      try {
+        await google.deleteEvent(row.google_event_id);
+      } catch (e) {
+        console.warn(e.message);
+      }
+    }
+
+    db.prepare(`UPDATE bookings SET status = 'cancelled' WHERE id = ?`).run(req.params.id);
+    res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'server_error', message: err.message });
@@ -159,37 +203,6 @@ router.delete('/blocked/:id', (req, res) => {
   const result = db.prepare('DELETE FROM blocked_slots WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
   res.json({ ok: true });
-});
-
-router.get('/bookings', (req, res) => {
-  const rows = db.prepare(`
-    SELECT id, date, time, duration_min, name, phone, location, note, status, created_at
-    FROM bookings
-    WHERE status = 'confirmed'
-    ORDER BY date ASC, time ASC
-  `).all();
-  res.json({ bookings: rows });
-});
-
-router.post('/bookings/:id/cancel', express.json(), async (req, res) => {
-  try {
-    const row = db.prepare('SELECT * FROM bookings WHERE id = ?').get(req.params.id);
-    if (!row) return res.status(404).json({ error: 'not_found' });
-
-    if (row.google_event_id) {
-      try {
-        await google.deleteEvent(row.google_event_id);
-      } catch (e) {
-        console.warn('Nie udalo sie usunac wydarzenia w Google Calendar (mogl byc juz usuniety recznie):', e.message);
-      }
-    }
-
-    db.prepare(`UPDATE bookings SET status = 'cancelled' WHERE id = ?`).run(req.params.id);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'server_error', message: err.message });
-  }
 });
 
 module.exports = router;

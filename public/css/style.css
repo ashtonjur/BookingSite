@@ -218,6 +218,19 @@ form.booking-form.visible { display: block; }
 .location-btn[data-color="blue"].selected { border-color: #3b6fd6; background: #eaf0fb; }
 .location-btn[data-color="green"].selected { border-color: #3f8a4c; background: #eaf6ec; }
 
+.duration-btn {
+  flex: 1;
+  padding: 10px 10px;
+  border-radius: 8px;
+  border: 2px solid var(--line);
+  background: var(--card);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+.duration-btn.selected { border-color: var(--pine); background: #eef3ee; color: var(--pine-dark); }
+
 .modal-overlay {
   position: fixed;
   inset: 0;
