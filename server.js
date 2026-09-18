@@ -3,18 +3,22 @@ const path = require('path');
 const express = require('express');
 const basicAuth = require('express-basic-auth');
 
-require('./db'); 
+require('./db');
 
 const authRoutes = require('./routes/auth');
 const apiRoutes = require('./routes/api');
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
 const adminAuth = basicAuth({
   users: { [process.env.ADMIN_USER || 'admin']: process.env.ADMIN_PASSWORD || 'zmien_to_haslo' },
   challenge: true,
   realm: 'BookingAppAdmin',
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ ok: true });
 });
 
 app.use('/admin.html', adminAuth);
