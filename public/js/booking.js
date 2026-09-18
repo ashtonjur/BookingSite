@@ -8,11 +8,11 @@
   const slotsGrid = document.getElementById('slotsGrid');
   const reserveBtn = document.getElementById('reserveBtn');
   const durationOptionsEl = document.getElementById('durationOptions');
+  const locationOptionsEl = document.getElementById('locationOptions');
 
   const modalOverlay = document.getElementById('modalOverlay');
   const modalSummary = document.getElementById('modalSummary');
   const modalCancel = document.getElementById('modalCancel');
-  const locationOptions = document.getElementById('locationOptions');
   const bookingForm = document.getElementById('bookingForm');
   const confirmBox = document.getElementById('confirmBox');
   const confirmText = document.getElementById('confirmText');
@@ -42,6 +42,7 @@
   let selectedDuration = null;
   let locations = [];
   let durationOptions = [];
+  let maxBookableDate = null;
 
   const todayStr = toISODate(new Date());
 
@@ -54,6 +55,11 @@
 
   function firstOfMonth(y, m) { return new Date(y, m, 1); }
   function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
+
+  function currentLocationName() {
+    const loc = locations.find((l) => l.id === selectedLocation);
+    return loc ? loc.name : '';
+  }
 
   async function init() {
     const [statusRes, locationsRes] = await Promise.all([
@@ -69,16 +75,27 @@
 
     durationOptions = status.durationOptionsMin || [60, 90];
     selectedDuration = durationOptions[0];
+    maxBookableDate = status.maxBookableDate || null;
     renderDurationOptions();
 
     const locData = await locationsRes.json();
     locations = locData.locations || [];
+    selectedLocation = locations.length ? locations[0].id : null;
     renderLocationOptions();
 
     const now = new Date();
     viewYear = now.getFullYear();
     viewMonth = now.getMonth();
     await loadMonth();
+  }
+
+  function resetSelectionAndReload() {
+    selectedDate = null;
+    selectedTime = null;
+    slotsSection.style.display = 'none';
+    reserveBtn.style.display = 'none';
+    confirmBox.style.display = 'none';
+    loadMonth();
   }
 
   function renderDurationOptions() {
@@ -89,38 +106,35 @@
       btn.className = 'duration-btn';
       if (min === selectedDuration) btn.classList.add('selected');
       btn.textContent = formatDuration(min);
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => {
         if (selectedDuration === min) return;
         selectedDuration = min;
-        document.querySelectorAll('.duration-btn').forEach((b) => b.classList.remove('selected'));
+        document.querySelectorAll('#durationOptions .duration-btn').forEach((b) => b.classList.remove('selected'));
         btn.classList.add('selected');
-
-        selectedDate = null;
-        selectedTime = null;
-        slotsSection.style.display = 'none';
-        reserveBtn.style.display = 'none';
-        confirmBox.style.display = 'none';
-        await loadMonth();
+        resetSelectionAndReload();
       });
       durationOptionsEl.appendChild(btn);
     });
   }
 
   function renderLocationOptions() {
-    locationOptions.innerHTML = '';
+    locationOptionsEl.innerHTML = '';
     locations.forEach((loc) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'location-btn';
       btn.dataset.color = loc.color;
       btn.dataset.id = loc.id;
+      if (loc.id === selectedLocation) btn.classList.add('selected');
       btn.innerHTML = `<span class="dot"></span>${loc.name}`;
       btn.addEventListener('click', () => {
+        if (selectedLocation === loc.id) return;
         selectedLocation = loc.id;
-        document.querySelectorAll('.location-btn').forEach((b) => b.classList.remove('selected'));
+        document.querySelectorAll('#locationOptions .location-btn').forEach((b) => b.classList.remove('selected'));
         btn.classList.add('selected');
+        resetSelectionAndReload();
       });
-      locationOptions.appendChild(btn);
+      locationOptionsEl.appendChild(btn);
     });
   }
 
@@ -129,7 +143,7 @@
     const lastDay = new Date(viewYear, viewMonth, daysInMonth(viewYear, viewMonth));
     const to = toISODate(lastDay);
 
-    const res = await fetch(`/api/available-days?from=${from}&to=${to}&duration=${selectedDuration}`);
+    const res = await fetch(`/api/available-days?from=${from}&to=${to}&duration=${selectedDuration}&location=${selectedLocation}`);
     const data = await res.json();
     availableDaysSet = new Set(data.days || []);
     renderCalendar();
@@ -174,6 +188,11 @@
     const now = new Date();
     const isCurrentMonth = viewYear === now.getFullYear() && viewMonth === now.getMonth();
     prevBtn.disabled = isCurrentMonth;
+
+    if (maxBookableDate) {
+      const nextMonthFirstDay = toISODate(new Date(viewYear, viewMonth + 1, 1));
+      nextBtn.disabled = nextMonthFirstDay > maxBookableDate;
+    }
   }
 
   async function selectDate(iso, el) {
@@ -188,7 +207,7 @@
     slotsGrid.innerHTML = '';
     confirmBox.style.display = 'none';
 
-    const res = await fetch(`/api/available-slots?date=${iso}&duration=${selectedDuration}`);
+    const res = await fetch(`/api/available-slots?date=${iso}&duration=${selectedDuration}&location=${selectedLocation}`);
     const data = await res.json();
     const slots = data.slots || [];
 
@@ -215,10 +234,8 @@
   }
 
   function openModal() {
-    modalSummary.textContent = `${selectedDate} o ${selectedTime} · ${formatDuration(selectedDuration)}`;
+    modalSummary.textContent = `${selectedDate} o ${selectedTime} · ${formatDuration(selectedDuration)} · ${currentLocationName()}`;
     formError.style.display = 'none';
-    selectedLocation = null;
-    document.querySelectorAll('.location-btn').forEach((b) => b.classList.remove('selected'));
     bookingForm.reset();
     modalOverlay.style.display = 'flex';
   }
@@ -236,12 +253,6 @@
   bookingForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     formError.style.display = 'none';
-
-    if (!selectedLocation) {
-      formError.textContent = 'Wybierz lokalizację.';
-      formError.style.display = 'block';
-      return;
-    }
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Wysyłanie…';
@@ -272,9 +283,6 @@
           await selectDate(selectedDate, document.querySelector('.cal-day.selected'));
         } else if (data.error === 'invalid_phone') {
           formError.textContent = 'Podaj poprawny numer telefonu (min. 9 cyfr).';
-          formError.style.display = 'block';
-        } else if (data.error === 'invalid_location') {
-          formError.textContent = 'Wybierz lokalizację.';
           formError.style.display = 'block';
         } else if (data.error === 'missing_fields') {
           formError.textContent = 'Wypełnij wszystkie wymagane pola.';

@@ -57,6 +57,30 @@
   </div>
 
   <div class="card" style="margin-top: 24px;">
+    <h3>Dzień tylko w jednej lokalizacji</h3>
+    <p class="sub" style="color: var(--ink-soft); font-size: 0.9rem; margin-bottom: 16px;">
+      Ustaw, że danego dnia dostępna jest tylko jedna lokalizacja — druga zniknie z kalendarza klienta.
+    </p>
+
+    <form id="dayLockForm" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+      <div class="field" style="margin-bottom:0;">
+        <label for="dayLockDate">Data</label>
+        <input type="date" id="dayLockDate" required />
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label for="dayLockLocation">Dostępna lokalizacja</label>
+        <select id="dayLockLocation" style="padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); font-family:inherit; font-size:0.95rem;"></select>
+      </div>
+      <button type="submit" class="btn-primary">Ustaw</button>
+    </form>
+    <div id="dayLockError" class="error-box" style="display:none;"></div>
+
+    <div id="dayLocksWrap" style="margin-top:18px;">
+      <p class="empty-note">Ładowanie…</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 24px;">
     <h3>Link dla klientów</h3>
     <p>Wyślij ten adres klientom, żeby mogli sami umówić termin:</p>
     <p><code id="publicLink"></code></p>

@@ -28,6 +28,7 @@ router.get('/status', (req, res) => {
     connected: google.isConnected(),
     durationOptionsMin: cfg.durationOptions,
     slotStepMin: cfg.slotStep,
+    maxBookableDate: availability.getBookingWindowEnd(cfg).toFormat('yyyy-MM-dd'),
     timezone: cfg.timezone,
   });
 });
@@ -47,8 +48,12 @@ router.get('/available-days', async (req, res) => {
     if (!availability.isValidDuration(duration, cfg)) {
       return res.status(400).json({ error: 'invalid_duration' });
     }
+    const location = req.query.location || '1';
+    if (!LOCATION_NAMES[location]) {
+      return res.status(400).json({ error: 'invalid_location' });
+    }
 
-    const days = await availability.getAvailableDaysInRange(from, to, duration);
+    const days = await availability.getAvailableDaysInRange(from, to, duration, location);
     res.json({ days });
   } catch (err) {
     console.error(err);
@@ -69,8 +74,12 @@ router.get('/available-slots', async (req, res) => {
     if (!availability.isValidDuration(duration, cfg)) {
       return res.status(400).json({ error: 'invalid_duration' });
     }
+    const location = req.query.location || '1';
+    if (!LOCATION_NAMES[location]) {
+      return res.status(400).json({ error: 'invalid_location' });
+    }
 
-    const slots = await availability.getAvailableSlotsForDate(date, duration);
+    const slots = await availability.getAvailableSlotsForDate(date, duration, location);
     res.json({ slots: slots.map((s) => s.toFormat('HH:mm')) });
   } catch (err) {
     console.error(err);
@@ -103,7 +112,7 @@ router.post('/book', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'invalid_duration' });
     }
 
-    const freshSlots = await availability.getAvailableSlotsForDate(date, durationMin);
+    const freshSlots = await availability.getAvailableSlotsForDate(date, durationMin, location);
     const match = freshSlots.find((s) => s.toFormat('HH:mm') === time);
     if (!match) {
       return res.status(409).json({ error: 'slot_taken' });
@@ -201,6 +210,43 @@ router.post('/blocked', express.json(), (req, res) => {
 
 router.delete('/blocked/:id', (req, res) => {
   const result = db.prepare('DELETE FROM blocked_slots WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
+  res.json({ ok: true });
+});
+
+router.get('/day-locks', (req, res) => {
+  const rows = db.prepare(`
+    SELECT id, date, location, created_at
+    FROM day_location_locks
+    ORDER BY date ASC
+  `).all();
+  res.json({
+    locks: rows.map((r) => ({ ...r, locationName: LOCATION_NAMES[r.location] || r.location })),
+  });
+});
+
+router.post('/day-locks', express.json(), (req, res) => {
+  const { date, location } = req.body || {};
+
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'invalid_date' });
+  }
+  if (!LOCATION_NAMES[location]) {
+    return res.status(400).json({ error: 'invalid_location' });
+  }
+
+  const id = nanoid(10);
+  db.prepare(`
+    INSERT INTO day_location_locks (id, date, location)
+    VALUES (?, ?, ?)
+    ON CONFLICT(date) DO UPDATE SET location = excluded.location
+  `).run(id, date, location);
+
+  res.json({ ok: true });
+});
+
+router.delete('/day-locks/:id', (req, res) => {
+  const result = db.prepare('DELETE FROM day_location_locks WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
   res.json({ ok: true });
 });

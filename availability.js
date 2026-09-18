@@ -5,8 +5,8 @@ const db = require('./db');
 function getConfig() {
   return {
     timezone: process.env.TIMEZONE || 'Europe/Warsaw',
-    workStart: process.env.WORK_START || '06:00',
-    workEnd: process.env.WORK_END || '22:00',
+    workStart: process.env.WORK_START || '09:00',
+    workEnd: process.env.WORK_END || '17:00',
     satWorkStart: process.env.SAT_WORK_START || null,
     satWorkEnd: process.env.SAT_WORK_END || null,
     workDays: (process.env.WORK_DAYS || '1,2,3,4,5,6').split(',').map(Number),
@@ -14,6 +14,7 @@ function getConfig() {
     durationOptions: (process.env.DURATION_OPTIONS_MIN || '60,90').split(',').map(Number),
     windowDays: parseInt(process.env.BOOKING_WINDOW_DAYS || '30', 10),
     minNoticeHours: parseInt(process.env.MIN_NOTICE_HOURS || '12', 10),
+    locationBufferMin: parseInt(process.env.LOCATION_SWITCH_BUFFER_MIN || '60', 10),
   };
 }
 
@@ -64,13 +65,22 @@ function isDateBlocked(dateISO) {
   return !!row;
 }
 
+function getDayLocationLock(dateISO) {
+  const row = db.prepare(`SELECT location FROM day_location_locks WHERE date = ?`).get(dateISO);
+  return row ? row.location : null;
+}
+
 function getLocalBookingIntervals(dateISO, cfg) {
   const rows = db.prepare(
-    `SELECT time, duration_min FROM bookings WHERE date = ? AND status = 'confirmed'`
+    `SELECT time, duration_min, location FROM bookings WHERE date = ? AND status = 'confirmed'`
   ).all(dateISO);
   return rows.map((r) => {
     const start = DateTime.fromISO(`${dateISO}T${r.time}`, { zone: cfg.timezone });
-    return { start: start.toJSDate(), end: start.plus({ minutes: r.duration_min }).toJSDate() };
+    return {
+      start: start.toJSDate(),
+      end: start.plus({ minutes: r.duration_min }).toJSDate(),
+      location: r.location,
+    };
   });
 }
 
@@ -84,7 +94,23 @@ function getBlockedIntervals(dateISO, cfg) {
   });
 }
 
-async function getAvailableSlotsForDate(dateISO, durationMin) {
+
+function buildBusyIntervals(dateISO, cfg, googleBusy, location) {
+  const localBookings = getLocalBookingIntervals(dateISO, cfg);
+  const blocked = getBlockedIntervals(dateISO, cfg);
+
+  const bufferMs = cfg.locationBufferMin * 60000;
+  const bufferedForOtherLocation = localBookings
+    .filter((b) => b.location !== location)
+    .map((b) => ({
+      start: new Date(b.start.getTime() - bufferMs),
+      end: new Date(b.end.getTime() + bufferMs),
+    }));
+
+  return [...googleBusy, ...localBookings, ...blocked, ...bufferedForOtherLocation];
+}
+
+async function getAvailableSlotsForDate(dateISO, durationMin, location) {
   const cfg = getConfig();
   const dt = DateTime.fromISO(dateISO, { zone: cfg.timezone });
 
@@ -92,20 +118,19 @@ async function getAvailableSlotsForDate(dateISO, durationMin) {
   if (isDateBlocked(dateISO)) return [];
   if (dt > getBookingWindowEnd(cfg)) return [];
 
+  const lock = getDayLocationLock(dateISO);
+  if (lock && lock !== location) return [];
+
   const candidates = generateCandidateStarts(dateISO, cfg, durationMin);
   if (candidates.length === 0) return [];
 
   const { start: workStart, end: workEnd } = getWorkBounds(dateISO, cfg);
-  const busy = await google.getBusyIntervals(workStart.toISO(), workEnd.toISO());
+  const googleBusy = await google.getBusyIntervals(workStart.toISO(), workEnd.toISO());
 
   const now = DateTime.now().setZone(cfg.timezone);
   const minStart = now.plus({ hours: cfg.minNoticeHours });
 
-  const allBusy = [
-    ...busy,
-    ...getLocalBookingIntervals(dateISO, cfg),
-    ...getBlockedIntervals(dateISO, cfg),
-  ];
+  const allBusy = buildBusyIntervals(dateISO, cfg, googleBusy, location);
 
   return candidates.filter((slotStart) => {
     if (slotStart < minStart) return false;
@@ -114,7 +139,7 @@ async function getAvailableSlotsForDate(dateISO, durationMin) {
   });
 }
 
-async function getAvailableDaysInRange(fromISO, toISO, durationMin) {
+async function getAvailableDaysInRange(fromISO, toISO, durationMin, location) {
   const cfg = getConfig();
   const windowEnd = getBookingWindowEnd(cfg);
   const from = DateTime.fromISO(fromISO, { zone: cfg.timezone }).startOf('day');
@@ -122,7 +147,7 @@ async function getAvailableDaysInRange(fromISO, toISO, durationMin) {
   const to = requestedTo > windowEnd ? windowEnd : requestedTo;
   if (to < from) return [];
 
-  const busy = await google.getBusyIntervals(from.toISO(), to.toISO());
+  const googleBusy = await google.getBusyIntervals(from.toISO(), to.toISO());
 
   const now = DateTime.now().setZone(cfg.timezone);
   const minStart = now.plus({ hours: cfg.minNoticeHours });
@@ -131,13 +156,12 @@ async function getAvailableDaysInRange(fromISO, toISO, durationMin) {
   let cursor = from;
   while (cursor <= to) {
     const dateISO = cursor.toFormat('yyyy-MM-dd');
-    if (cfg.workDays.includes(cursor.weekday % 7) && !isDateBlocked(dateISO)) {
+    const lock = getDayLocationLock(dateISO);
+    const dayUsable = cfg.workDays.includes(cursor.weekday % 7) && !isDateBlocked(dateISO) && !(lock && lock !== location);
+
+    if (dayUsable) {
       const candidates = generateCandidateStarts(dateISO, cfg, durationMin);
-      const dayBusy = [
-        ...busy,
-        ...getLocalBookingIntervals(dateISO, cfg),
-        ...getBlockedIntervals(dateISO, cfg),
-      ];
+      const dayBusy = buildBusyIntervals(dateISO, cfg, googleBusy, location);
       const hasFree = candidates.some((slotStart) => {
         if (slotStart < minStart) return false;
         const slotEnd = slotStart.plus({ minutes: durationMin });
@@ -150,4 +174,11 @@ async function getAvailableDaysInRange(fromISO, toISO, durationMin) {
   return availableDays;
 }
 
-module.exports = { getConfig, isValidDuration, getBookingWindowEnd, getAvailableSlotsForDate, getAvailableDaysInRange };
+module.exports = {
+  getConfig,
+  isValidDuration,
+  getBookingWindowEnd,
+  getDayLocationLock,
+  getAvailableSlotsForDate,
+  getAvailableDaysInRange,
+};

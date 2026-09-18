@@ -24,11 +24,13 @@
   }
 
   let locationsById = {};
+  let locationsList = [];
 
   async function loadLocations() {
     const res = await fetch('/api/locations');
     const data = await res.json();
-    (data.locations || []).forEach((loc) => {
+    locationsList = data.locations || [];
+    locationsList.forEach((loc) => {
       locationsById[loc.id] = loc;
     });
   }
@@ -100,7 +102,6 @@
     return div.innerHTML;
   }
 
-  // --- Blokowanie terminow ---
   const blockForm = document.getElementById('blockForm');
   const blockDate = document.getElementById('blockDate');
   const blockTime = document.getElementById('blockTime');
@@ -196,6 +197,111 @@
 
   loadBlocked();
 
+  const dayLockForm = document.getElementById('dayLockForm');
+  const dayLockDate = document.getElementById('dayLockDate');
+  const dayLockLocation = document.getElementById('dayLockLocation');
+  const dayLockError = document.getElementById('dayLockError');
+  const dayLocksWrap = document.getElementById('dayLocksWrap');
+
+  function populateDayLockSelect() {
+    dayLockLocation.innerHTML = '';
+    locationsList.forEach((loc) => {
+      const opt = document.createElement('option');
+      opt.value = loc.id;
+      opt.textContent = loc.name;
+      dayLockLocation.appendChild(opt);
+    });
+  }
+
+  async function loadDayLocks() {
+    const res = await fetch('/api/day-locks');
+    if (!res.ok) {
+      dayLocksWrap.innerHTML = '<p class="empty-note">Nie udało się pobrać ograniczeń.</p>';
+      return;
+    }
+    const data = await res.json();
+    const rows = data.locks || [];
+
+    if (rows.length === 0) {
+      dayLocksWrap.innerHTML = '<p class="empty-note">Brak dni ograniczonych do jednej lokalizacji.</p>';
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'bookings';
+    table.innerHTML = `
+      <thead>
+        <tr><th>Data</th><th>Dostępna lokalizacja</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody');
+
+    rows.forEach((r) => {
+      const tr = document.createElement('tr');
+      const locColor = r.location === '2' ? '#3f8a4c' : '#3b6fd6';
+      tr.innerHTML = `
+        <td>${r.date}</td>
+        <td><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${locColor};margin-right:6px;"></span>${escapeHtml(r.locationName)}</td>
+        <td><button class="cancel-link" data-id="${r.id}">Usuń</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    dayLocksWrap.innerHTML = '';
+    dayLocksWrap.appendChild(table);
+
+    tbody.querySelectorAll('.cancel-link').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Usuwanie…';
+        const res = await fetch(`/api/day-locks/${btn.dataset.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          loadDayLocks();
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Usuń';
+          alert('Nie udało się usunąć ograniczenia.');
+        }
+      });
+    });
+  }
+
+  dayLockForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    dayLockError.style.display = 'none';
+
+    const payload = {
+      date: dayLockDate.value,
+      location: dayLockLocation.value,
+    };
+
+    if (!payload.date) {
+      dayLockError.textContent = 'Podaj datę.';
+      dayLockError.style.display = 'block';
+      return;
+    }
+
+    const res = await fetch('/api/day-locks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      dayLockError.textContent = 'Nie udało się ustawić ograniczenia.';
+      dayLockError.style.display = 'block';
+      return;
+    }
+
+    dayLockForm.reset();
+    loadDayLocks();
+  });
+
   loadStatus();
-  loadLocations().then(loadBookings);
+  loadLocations().then(() => {
+    populateDayLockSelect();
+    loadBookings();
+    loadDayLocks();
+  });
 })();

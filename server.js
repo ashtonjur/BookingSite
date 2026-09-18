@@ -3,17 +3,13 @@ const path = require('path');
 const express = require('express');
 const basicAuth = require('express-basic-auth');
 
-require('./db');
+require('./db'); 
 
 const authRoutes = require('./routes/auth');
 const apiRoutes = require('./routes/api');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
-});
 
 const adminAuth = basicAuth({
   users: { [process.env.ADMIN_USER || 'admin']: process.env.ADMIN_PASSWORD || 'zmien_to_haslo' },
@@ -28,12 +24,15 @@ app.post('/api/bookings/:id/cancel', adminAuth);
 app.get('/api/blocked', adminAuth);
 app.post('/api/blocked', adminAuth);
 app.delete('/api/blocked/:id', adminAuth);
+app.get('/api/day-locks', adminAuth);
+app.post('/api/day-locks', adminAuth);
+app.delete('/api/day-locks/:id', adminAuth);
 
 app.use('/api', apiRoutes);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, () => {
   console.log(`Booking app dziala na porcie ${PORT}`);
   console.log(`Strona rezerwacji: ${process.env.BASE_URL || 'http://localhost:' + PORT}`);
   console.log(`Panel admina:      ${process.env.BASE_URL || 'http://localhost:' + PORT}/admin.html`);
